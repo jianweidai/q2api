@@ -720,6 +720,7 @@ async def claude_messages(req: ClaudeRequest, account: Dict[str, Any] = Depends(
             final_content = []
             
             async for sse_line in event_generator():
+                # print(sse_line)
                 if sse_line.startswith("data: "):
                     data_str = sse_line[6:].strip()
                     if data_str == "[DONE]": continue
@@ -761,7 +762,7 @@ async def claude_messages(req: ClaudeRequest, account: Dict[str, Any] = Depends(
                     except:
                         pass
             
-            return {
+            return JSONResponse(content={
                 "id": f"msg_{uuid.uuid4()}",
                 "type": "message",
                 "role": "assistant",
@@ -770,7 +771,7 @@ async def claude_messages(req: ClaudeRequest, account: Dict[str, Any] = Depends(
                 "stop_reason": stop_reason,
                 "stop_sequence": None,
                 "usage": usage
-            }
+            })
 
     except Exception as e:
         # Ensure event_iter (if created) is closed to release upstream connection
