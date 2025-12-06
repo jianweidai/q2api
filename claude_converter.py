@@ -172,6 +172,26 @@ def merge_user_messages(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     
     return result
 
+def _detect_tool_call_loop(messages: List[ClaudeMessage], threshold: int = 3) -> Optional[str]:
+    """Detect if the same tool is being called repeatedly (potential infinite loop)."""
+    recent_tool_calls = []
+    
+    for msg in messages[-10:]:  # Check last 10 messages
+        if msg.role == "assistant" and isinstance(msg.content, list):
+            for block in msg.content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    tool_name = block.get("name")
+                    tool_input = json.dumps(block.get("input", {}), sort_keys=True)
+                    recent_tool_calls.append((tool_name, tool_input))
+    
+    if len(recent_tool_calls) >= threshold:
+        # Check if the last N tool calls are identical
+        last_calls = recent_tool_calls[-threshold:]
+        if len(set(last_calls)) == 1:
+            return f"Detected infinite loop: tool '{last_calls[0][0]}' called {threshold} times with same input"
+    
+    return None
+
 def process_history(messages: List[ClaudeMessage], thinking_enabled: bool = False, hint: str = THINKING_HINT) -> List[Dict[str, Any]]:
     """Process history messages to match Amazon Q format (alternating user/assistant)."""
     history = []
@@ -306,6 +326,11 @@ def convert_claude_to_amazonq_request(req: ClaudeRequest, conversation_id: Optio
     """Convert ClaudeRequest to Amazon Q request body."""
     if conversation_id is None:
         conversation_id = str(uuid.uuid4())
+    
+    # Detect infinite tool call loops
+    loop_error = _detect_tool_call_loop(req.messages, threshold=3)
+    if loop_error:
+        raise ValueError(loop_error)
     
     thinking_enabled = is_thinking_mode_enabled(getattr(req, "thinking", None))
         
