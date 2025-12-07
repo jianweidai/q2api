@@ -188,6 +188,8 @@ def _detect_tool_call_loop(messages: List[ClaudeMessage], threshold: int = 3) ->
         # Check if the last N tool calls are identical
         last_calls = recent_tool_calls[-threshold:]
         if len(set(last_calls)) == 1:
+            # Log detailed info for debugging
+            logger.warning(f"Tool call loop detected - Tool: {last_calls[0][0]}, Input: {last_calls[0][1][:500]}")
             return f"Detected infinite loop: tool '{last_calls[0][0]}' called {threshold} times with same input"
     
     return None
