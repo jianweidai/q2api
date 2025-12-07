@@ -329,10 +329,10 @@ def convert_claude_to_amazonq_request(req: ClaudeRequest, conversation_id: Optio
     if conversation_id is None:
         conversation_id = str(uuid.uuid4())
     
-    # Detect infinite tool call loops
-    loop_error = _detect_tool_call_loop(req.messages, threshold=3)
-    if loop_error:
-        raise ValueError(loop_error)
+    # Detect infinite tool call loops (warning only, don't block)
+    loop_warning = _detect_tool_call_loop(req.messages, threshold=5)
+    if loop_warning:
+        logger.warning(f"Potential tool loop detected (continuing anyway): {loop_warning}")
     
     thinking_enabled = is_thinking_mode_enabled(getattr(req, "thinking", None))
         
