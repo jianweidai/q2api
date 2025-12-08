@@ -128,7 +128,11 @@ def convert_tool(tool: ClaudeTool) -> Dict[str, Any]:
     }
 
 def merge_user_messages(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Merge consecutive user messages, keeping only the last 2 messages' images."""
+    """Merge consecutive user messages, keeping only the last 2 messages' images.
+    
+    IMPORTANT: This function properly merges toolResults from all messages to prevent
+    losing tool execution history, which would cause infinite loops.
+    """
     if not messages:
         return {}
     
@@ -137,11 +141,23 @@ def merge_user_messages(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     base_origin = None
     base_model = None
     all_images = []
+    all_tool_results = []  # Collect toolResults from all messages
     
     for msg in messages:
         content = msg.get("content", "")
+        msg_ctx = msg.get("userInputMessageContext", {})
+        
+        # Initialize base context from first message
         if base_context is None:
-            base_context = msg.get("userInputMessageContext", {})
+            base_context = msg_ctx.copy() if msg_ctx else {}
+            # Remove toolResults from base to merge them separately
+            if "toolResults" in base_context:
+                all_tool_results.extend(base_context.pop("toolResults"))
+        else:
+            # Collect toolResults from subsequent messages
+            if "toolResults" in msg_ctx:
+                all_tool_results.extend(msg_ctx["toolResults"])
+        
         if base_origin is None:
             base_origin = msg.get("origin", "CLI")
         if base_model is None:
@@ -162,6 +178,10 @@ def merge_user_messages(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         "modelId": base_model
     }
     
+    # Add merged toolResults if any
+    if all_tool_results:
+        result["userInputMessageContext"]["toolResults"] = all_tool_results
+    
     # Only keep images from the last 2 messages that have images
     if all_images:
         kept_images = []
@@ -173,7 +193,12 @@ def merge_user_messages(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     return result
 
 def process_history(messages: List[ClaudeMessage], thinking_enabled: bool = False, hint: str = THINKING_HINT) -> List[Dict[str, Any]]:
-    """Process history messages to match Amazon Q format (alternating user/assistant)."""
+    """Process history messages to match Amazon Q format (alternating user/assistant).
+    
+    Dual-mode detection:
+    - If messages already alternate correctly (no consecutive user/assistant), skip merging
+    - If messages have consecutive same-role messages, apply merge logic
+    """
     history = []
     seen_tool_use_ids = set()
     
@@ -284,7 +309,23 @@ def process_history(messages: List[ClaudeMessage], thinking_enabled: bool = Fals
             
             raw_history.append(entry)
 
-    # Second pass: merge consecutive user messages
+    # Dual-mode detection: check if messages already alternate correctly
+    has_consecutive_same_role = False
+    prev_role = None
+    for item in raw_history:
+        current_role = "user" if "userInputMessage" in item else "assistant"
+        if prev_role == current_role:
+            has_consecutive_same_role = True
+            break
+        prev_role = current_role
+    
+    # If messages already alternate, skip merging (fast path)
+    if not has_consecutive_same_role:
+        logger.info("Messages already alternate correctly, skipping merge logic")
+        return raw_history
+
+    # Second pass: merge consecutive user messages (only if needed)
+    logger.info("Detected consecutive same-role messages, applying merge logic")
     pending_user_msgs = []
     for item in raw_history:
         if "userInputMessage" in item:
